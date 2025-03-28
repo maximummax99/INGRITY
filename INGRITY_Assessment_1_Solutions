@@ -1,0 +1,38 @@
+import pandas as pd
+from collections import Counter
+
+#Import csv file.
+df = pd.read_csv("C:/Users/Max Sun/Downloads/dataset1.csv")
+
+#Q1. Find the category with the highest average rating.
+avg_ratings = df.groupby(["Category"])["Rating"].mean()
+max_category = avg_ratings.idxmax()
+print(max_category)
+
+#Q2. Find the total stock available for each category.
+print(df.groupby(["Category"])["Stock"].sum())
+
+#Q3. Create a new column Final_Price where Final_Price = Price - (Price * Discount / 100).
+df["Final_Price"] = df["Price"] - (df["Price"]*df["Discount"]/100)
+print(df)
+
+#Q4. Find the top 3 most discounted products.
+most_discounted_products = df.sort_values(by="Discount", ascending=False)
+print(most_discounted_products["Product_ID"].head(3))
+
+#Q5. Find the supplier with the highest average price of products.
+avg_prices_per_supplier = df.groupby(["Supplier"])["Price"].mean()
+max_supplier = avg_prices_per_supplier.idxmax()
+print(max_supplier)
+
+#Q6. Find the total number of unique suppliers.
+print(df["Supplier"].nunique())
+
+#Q7. Count the occurrences of each category using collections.Counter.
+category_counts = Counter(df["Category"])
+print(category_counts)
+
+#Q8. Find the most common category.
+most_common_category = category_counts.most_common(1)
+print(most_common_category[0][0])
+

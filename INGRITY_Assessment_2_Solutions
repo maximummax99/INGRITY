@@ -1,0 +1,357 @@
+import pandas as pd
+from collections import Counter, defaultdict
+import itertools
+import matplotlib.pyplot as plt
+
+
+df = pd.read_csv("C:/Users/Max Sun/Downloads/dataset2.csv")
+
+
+# **1. Advanced Data Cleaning (Pandas)**
+
+
+#Q1)a) Handle duplicate rows (keep first valid entry).
+df = df.drop_duplicates(keep="first")
+# print(df.to_string())
+
+
+#b) Fix Product typos (map variations to canonical names: ProdA/Product A → "Product A").
+#Printed out all unique variations of a product and noticed that the actual item is only referred to by its last character. Assume this is true for a larger out-of-sample dataset as well.
+unique_product_names = df["Product"].unique()
+# print(unique_product_names)
+
+#Create a map that maps the product's name to the product's canonical name.
+product_canonical_names_map = {}
+for unique_product_name in unique_product_names:
+    product_canonical_name = "Product " + unique_product_name[-1]
+    product_canonical_names_map[unique_product_name] = product_canonical_name
+
+#Replace all product names with its canonical name.
+df["Product"] = df["Product"].replace(product_canonical_names_map)
+
+#Display all columns fully.
+pd.set_option("display.max_columns", None)
+# print(df.to_string())
+
+
+#c) Replace negative Quantity with 1.
+#Look at unique data types for values in the "Quantity" column to make sure they are all integers.
+# print(df["Quantity"].apply(type).unique())
+
+#Apply a lambda function which converts negatives values to 1 to the values in the "Quantity" column.
+df["Quantity"] = df["Quantity"].apply(lambda quantity: 1 if quantity < 0 else quantity)
+
+# print(df.to_string())
+
+
+#d) Drop rows with negative Price.
+#Look at unique data types for values in the "Price" column to make sure they are all floats.
+# print(df["Price"].apply(type).unique())
+
+#Find index of rows with negative price and drop rows with that index.
+negative_prices_index = df[df["Price"] < 0].index
+df.drop(negative_prices_index, inplace = True)
+
+# print(df.to_string())
+
+
+#e) Fix Category inconsistencies (all electronics-related typos → "Electronics").
+#Look at all possible typos of "Electronics".
+unique_category_names = df["Category"].unique()
+# print(unique_category_names)
+
+#Only electronics-related typo is "Electronics" being written as "Eletronics". Assume this is true for a larger out-of-sample dataset as well.
+#Apply a lambda function which replaces all instances of "Eletronics" with "Electronics" in the "Category" column.
+df["Category"] = df["Category"].apply(lambda category: "Electronics" if category == "Eletronics" else category)
+
+# print(df.to_string())
+
+
+#f) Impute missing Regions using CustomerID's most common region.
+#Get the number of orders per region.
+category_counts = Counter(df["Region"])
+
+#Get the most common region that isn't nan. Take 2nd most common region in case most common region is nan.
+most_common_region = category_counts.most_common(1)[0][0]
+if pd.isna(most_common_region):
+    most_common_region = category_counts.most_common(2)[1][0]
+
+#Apply a lambda function which imputes missing regions with the most common region in the "Region" column.
+df["Region"] = df["Region"].apply(lambda region: most_common_region if pd.isna(region) else region)
+
+# print(df.to_string())
+
+
+#g) Create `IsPromo` flag from PromoCode.
+#Apply a lambda function which flags an order as False if there is no promo (nan) and flags an order as True if there is a promo. Add a new "isPromo" column to df based off of these booleans.
+df["IsPromo"] = df["PromoCode"].apply(lambda promocode: False if pd.isna(promocode) else True)
+
+print(df.to_string())
+
+
+# **2. Complex DateTime Operations**
+
+
+#Q2)a) Convert all dates to UTC datetime.
+#Look at unique data types for values in the "OrderDate" column. Noticed that all values in the "OrderDate" column are strings.
+# print(df["OrderDate"].apply(type).unique())
+
+#Upon looking at the values in the "OrderDate" column, noticed that the dates are either in a YYYY-MM-DD, MM-DD-YY, DD/MM/YYYY or Unix timestamp format.
+def convert_to_utcdatetime(date_str: str):
+    #Convert dates formatted as a Unix timestamp to UTC datetime format.
+    if "-" not in date_str and "/" not in date_str:
+        return pd.to_datetime(date_str, unit="ms", utc=True)
+
+    #Convert dates formatted as YYYY-MM-DD, MM-DD-YY or DD/MM/YYYY to UTC datetime format.
+    else:
+        return pd.to_datetime(date_str, utc=True)
+
+#Apply convert_to_utcdatetime function to all values in the "OrderDate" column.
+df["OrderDate"] = df["OrderDate"].apply(convert_to_utcdatetime)
+
+print(df.to_string())
+
+
+#b) Calculate order processing time (assume returns happen 7 days after order).
+#Question doesn't make much sense as there is no "FulfilDate" column within the df. Hence, I assume that the order processing time is the difference in time between OrderDate and ReturnDate.
+
+#Find the ReturnDate for orders which have been returned.
+df["ReturnDate"] = df[df["ReturnFlag"] == 1]["OrderDate"] + pd.to_timedelta(7, unit="d")
+
+#Calculate the order processing time in seconds for orders which have been returned and add a new "OrderProcessingTimeSeconds" column based off of these times.
+df["OrderProcessingTimeSeconds"] = (df["ReturnDate"] - df["OrderDate"]).dt.total_seconds()
+
+#Drop the "ReturnDate" column as it isn't specified in the question.
+df.drop(columns=["ReturnDate"], inplace=True)
+
+print(df.to_string())
+
+
+#c) Find weekly sales trends for electronics vs home goods.
+#Sort the df by Category and then OrderDate.
+sort_df = df.sort_values(by=["Category", "OrderDate"])
+
+#Get the rows where Category is "Electronics" or "Home".
+sort_df_electronics_home = sort_df[sort_df["Category"].isin(["Electronics", "Home"])]
+
+#Get what week in the year the date is on and create a new "YearWeek" column based off of these weeks.
+sort_df_electronics_home["YearWeek"] = sort_df_electronics_home["OrderDate"].dt.strftime("%Y-%U")
+
+#Find the number of sales within a particular week for each category.
+weekly_sales = sort_df_electronics_home.groupby(["YearWeek", "Category"])["OrderID"].count().reset_index()
+weekly_sales = weekly_sales.rename(columns={"OrderID": "Sales"})
+# print(weekly_sales)
+
+#From printing this out, it can be seen that the YearWeek "1970-03" is very far away from the other dates and will thus be of no use in finding weekly sales trends. I will therefore only get the sales not corresponding to this YearWeek.
+weekly_sales_relevant = weekly_sales[weekly_sales["YearWeek"] != "1970-03"]
+# print(weekly_sales_relevant)
+
+#Pivot the dataframe such that the columns are now "Yearweek", "Electronics" and "Home" with the values being Sales. Replace nan values with 0.
+weekly_sales_pivoted = weekly_sales_relevant.pivot(index="YearWeek", columns="Category", values="Sales").fillna(0).reset_index()
+
+#By printing out weekly_sales_relevant, it can also be seen that all data in weekly_sales_relevant comes from only 1 year.
+#Extract the year from weekly_sales_relevant.
+year = weekly_sales_pivoted["YearWeek"].iloc[0].split("-")[0]
+
+#Find the maximum number of weeks.
+max_week = weekly_sales_pivoted["YearWeek"].apply(lambda year_week: int(year_week.split("-")[1])).max()
+
+#Make a list with all the possible weeks in the year formatted as YYYY-WW.
+possible_weeks = [f"{year}-{str(i).zfill(2)}" for i in range(1, max_week + 1)]
+
+#Include all possible weeks in weekly_sales_pivoted and fill in missing values for "Electronics" and "Home" as 0.0.
+weekly_sales_pivoted = weekly_sales_pivoted.set_index("YearWeek").reindex(possible_weeks, fill_value=0.0).reset_index()
+
+#Plot the graph of the weekly sales trends for electronics vs home goods.
+weekly_sales_pivoted.plot(kind="line")
+plt.title("Weekly Sales Trends for Electronics vs Home Goods")
+plt.xlabel("Week in " + str(year))
+plt.ylabel("Sales")
+plt.grid(True)
+#NEED TO UNCOMMENT plt.show() BELOW TO SEE THE GRAPH!!!
+# plt.show()
+
+#From the graph, it can be seen that the weekly sales for both electronic and home goods tend to fluctuate between 0 and 2, with there being rare peaks of 3.
+#It also appears that the weekly sales for electronic and home goods are somewhat inversely correlated i.e. when there is a high number of sales of electronic goods, there is a low number of sales of home goods and vice versa. The only notable exception to this are the sales on YearWeek "2023-33".
+
+
+#d) Identify customers with >2 orders in any 14-day window.
+#Sort the df by customerID and then OrderDate.
+sorted_df = df.sort_values(by=["CustomerID", "OrderDate"])
+
+#Get the unique customerIDs to be used in a for loop.
+unique_customer_id = sorted(df["CustomerID"].unique())
+
+#Initialise a list to contain the customers with >2 orders in any 14-day window.
+customers_with_more_than_2_orders_in_14_days = []
+
+#Loop through every customer.
+for customer in unique_customer_id:
+    #Get the rows corresponding to that customer only.
+    df_customer = sorted_df[sorted_df["CustomerID"] == customer]
+
+    #Set the "OrderDate" column as the index for the rolling windows to be based on.
+    df_customer.set_index("OrderDate", inplace = True)
+
+    #Apply a rolling windows operation over the "OrderDate" column with a window size of 14 days that counts the number of orders within that window. Add a new "OrdersInWindow" column based off of these counts.
+    df_customer.loc[:, "OrdersInWindow"] = df_customer.index.to_series().rolling("14D").count()
+
+    #Get the max orders within any 14-day window.
+    max_orders_in_14_days = df_customer["OrdersInWindow"].max()
+
+    #If the max orders within any 14-day window is greater than 2, append that customer to the customers_with_more_than_2_orders_in_14_days list.
+    if max_orders_in_14_days > 2:
+        customers_with_more_than_2_orders_in_14_days.append(int(customer))
+
+print(customers_with_more_than_2_orders_in_14_days)
+
+
+# **3. Advanced Collections & Optimization**
+
+
+#Q3)a) Build nested dictionary: `{CustomerID: {"total_spent": X, "favorite_category": Y}}`.
+#Find the total amount of money spent by each customer.
+total_spent = df.groupby("CustomerID").agg(TotalSpent=("Price", "sum"))
+
+#Find the number of orders in each category for each customer.
+categories = df.groupby(["CustomerID", "Category"]).agg(Count=("Category", "count"))
+
+#Assume that favourite category means the category in which most orders are in for that customer.
+favourite_category = categories.loc[categories.groupby("CustomerID")["Count"].idxmax()]
+
+#Convert the total_spent df and the favourite_category df into dicts.
+total_spent_dict = total_spent.to_dict()
+favourite_category_dict = favourite_category.to_dict()
+
+#Remove the counts from favourite_category_dict as it is no longer needed.
+favourite_customer_categories = {}
+for (CustomerID, category), value in favourite_category_dict["Count"].items():
+    favourite_customer_categories[CustomerID] = category
+
+#Initialise the nested dict.
+nested_dict = {}
+
+#Get the unique customerIDs to be used in a for loop.
+unique_customer_ids = sorted(df["CustomerID"].unique())
+
+#Loop through every customer.
+for customer in unique_customer_ids:
+    #Convert the customer variable to an integer.
+    customer = int(customer)
+
+    #Initialise a dict for each customer within the nested dict as required.
+    nested_dict[customer] = {}
+
+    #Get the customer's total amount spent and their favourite category.
+    tot_spent = total_spent_dict["TotalSpent"][customer]
+    fav_category = favourite_customer_categories[customer]
+
+    #Add the customer's total amount spent and their favourite category to the nested dict.
+    nested_dict[customer]["total_spent"] = tot_spent
+    nested_dict[customer]["favourite_category"] = fav_category
+
+print(nested_dict)
+
+
+#b) Use `defaultdict` to track return rates by region: `{"North": 0.25, ...}`.
+#Initialise a defaultdict with a default value of a float.
+default_dict = defaultdict(float)
+
+#Calculate the return rates per region and display this in a new "ReturnRate" column.
+return_rates_by_region = df.groupby("Region").agg(Returns=("ReturnFlag", "sum"), Count=("ReturnFlag", "count")).assign(ReturnRate=lambda returns_count: returns_count["Returns"]/returns_count["Count"])
+
+#Convert the return_rates_by_region df into a dict.
+return_rates_by_region_dict = return_rates_by_region.to_dict()
+
+#Loop through every region.
+for region in return_rates_by_region_dict["ReturnRate"]:
+    #Add the region and its corresponding return rate to the defaultdict.
+    default_dict[region] = return_rates_by_region_dict["ReturnRate"][region]
+
+print(default_dict)
+
+
+#c) Find most common promo code sequence using `itertools` and `Counter`.
+#Get the number of times each promo code was used.
+promo_counts = Counter(df["PromoCode"])
+
+#Convert promo_counts into a list.
+promo_counts_list = list(promo_counts.items())
+
+#Create an infinite cycle iterator with the items coming from the promo_counts list.
+cycle_iterator = itertools.cycle(promo_counts_list)
+
+#Initialise variables.
+most_common_promo_code = ""
+max_count = 0
+
+#Assume that there is only 1 promo code with the highest count.
+#Loop through every promo_code and count pair using itertools.
+for i in range(len(promo_counts_list)):
+    iteration = next(cycle_iterator)
+    promo_code = iteration[0]
+    count = iteration[1]
+
+    #Change most_common_promo_code to the promo code if its count is higher than the previous highest count and update max_count to count.
+    if count > max_count:
+        most_common_promo_code = promo_code
+        max_count = count
+
+print(most_common_promo_code)
+
+
+#d) Optimize memory usage by downcasting numerical columns.
+#Look at which columns are numerical columns.
+# print(df.dtypes)
+
+#See that the numerical columns and their respective types are OrderID: int, CustomerID: int, Quantity: int, Price: float and ReturnFlag: int. Downcast these columns.
+df["OrderID"] = pd.to_numeric(df["OrderID"], downcast="integer")
+df["CustomerID"] = pd.to_numeric(df["CustomerID"], downcast="integer")
+df["Quantity"] = pd.to_numeric(df["Quantity"], downcast="integer")
+df["Price"] = pd.to_numeric(df["Price"], downcast="float")
+df["ReturnFlag"] = pd.to_numeric(df["ReturnFlag"], downcast="integer")
+
+print(df.dtypes)
+
+
+# **4. Bonus (If Time Permits)**
+
+
+#Q4)a) Create UDF to flag "suspicious orders" (multiple returns + high value).
+#I understand the question as a suspicious order being an order which is high in price and is made by a person with a high number of returns.
+
+def suspicious_orders(dataframe):
+    #Take high value as a price that is greater than 1 standard deviation above the mean price.
+    high_value_threshold = dataframe["Price"].mean() + + dataframe["Price"].std()
+
+    #Find the number of returns each customer made.
+    df_grouped_by_customer = dataframe.groupby("CustomerID").agg(Returns=("ReturnFlag", "sum")).reset_index()
+
+    #Take high number of returns as a number of returns that is greater than 1 standard deviation above the mean number of returns.
+    multiple_returns_threshold = df_grouped_by_customer["Returns"].mean() + df_grouped_by_customer["Returns"].std()
+
+    #Find the suspicious customers who have a high number of returns.
+    suspicious_customers = df_grouped_by_customer[df_grouped_by_customer["Returns"] > multiple_returns_threshold]["CustomerID"]
+
+    #Convert the suspicious_customers df to a list.
+    suspicious_customers_list = suspicious_customers.tolist()
+
+    #Add a new "SuspiciousOrders" column which is True for an order that is high in price and is made by a person with a high number of returns and False otherwise.
+    dataframe["SuspiciousOrders"] = ((dataframe["Price"] > high_value_threshold) & (dataframe["CustomerID"].isin(suspicious_customers_list)))
+    return dataframe
+
+dataset_2_df = suspicious_orders(df)
+print(dataset_2_df.to_string())
+
+
+#b) Calculate rolling 7-day average sales using efficient windowing.
+#Sort the df by OrderDate.
+sorted_df_date = df.sort_values("OrderDate")
+
+#Set the "OrderDate" column as the index for the rolling windows to be based on.
+sorted_df_date.set_index("OrderDate", inplace=True)
+
+#Apply a rolling windows operation over the "OrderDate" column with a window size of 7 days that calculates the average price of orders within that window. Add a new "Rolling7DayAvgSales" column based off of these averages.
+sorted_df_date["Rolling7DayAvgSales"] = sorted_df_date["Price"].rolling("7D").mean()
+
+print(sorted_df_date.to_string())

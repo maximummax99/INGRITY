@@ -12,6 +12,7 @@ df = pd.read_csv("C:/Users/Max Sun/Downloads/dataset2.csv")
 
 #Q1)a) Handle duplicate rows (keep first valid entry).
 df = df.drop_duplicates(keep="first")
+
 # print(df.to_string())
 
 
@@ -31,6 +32,7 @@ df["Product"] = df["Product"].replace(product_canonical_names_map)
 
 #Display all columns fully.
 pd.set_option("display.max_columns", None)
+
 # print(df.to_string())
 
 
